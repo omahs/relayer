@@ -142,7 +142,6 @@ export class ProfitClient {
       .mul(this.getPriceOfToken(GAS_TOKEN_BY_CHAIN_ID[deposit.destinationChainId]))
       .div(toBN(10).pow(GAS_TOKEN_DECIMALS));
 
-    // How much minimumAcceptableRevenue is scaled. If relayer discount is 0 then need minimumAcceptableRevenue at min.
     const fillProfitInUsd = fillRevenueInUsd.sub(gasCostInUsd);
     const fillProfitable = fillProfitInUsd.gte(toBN(0));
     this.logger.debug({
