@@ -1,5 +1,5 @@
 import { Provider } from "@ethersproject/abstract-provider";
-import { utils as ethersUtils } from "ethers";
+import { constants as ethersConstants, utils as ethersUtils } from "ethers";
 import * as constants from "../common/Constants";
 import { assert, BigNumber, formatFeePct, max, winston, toBNWei, toBN, assign } from "../utils";
 import { HubPoolClient } from ".";
@@ -114,7 +114,7 @@ export class ProfitClient {
       );
     }
 
-    this.isTestnet = this.hubPoolClient.chainId !== 1;
+    this.isTestnet = this.hubPoolClient.chainId !== CHAIN_IDs.MAINNET;
   }
 
   getAllPrices(): { [address: string]: BigNumber } {
@@ -123,7 +123,7 @@ export class ProfitClient {
 
   resolveTestnetTokenAddress(tokenAddress: string): L1Token {
     const hubToken = this.hubPoolClient.getL1Tokens().find(({ address }) => address === tokenAddress);
-    const address = TOKEN_SYMBOLS_MAP[hubToken.symbol].addresses[1];
+    const address = TOKEN_SYMBOLS_MAP[hubToken.symbol].addresses[CHAIN_IDs.MAINNET];
     return { address, decimals: hubToken.decimals, symbol: hubToken.symbol };
   }
 
@@ -135,7 +135,7 @@ export class ProfitClient {
 
     if (this.tokenPrices[token] === undefined) {
       this.logger.warn({ at: "ProfitClient#getPriceOfToken", message: `Token ${token} not in price list.` });
-      return toBN(0);
+      return ethersConstants.Zero;
     }
 
     return this.tokenPrices[token];
@@ -143,7 +143,7 @@ export class ProfitClient {
 
   // @todo: Factor in the gas cost of submitting the RefundRequest on alt refund chains.
   getTotalGasCost(chainId: number): BigNumber {
-    return this.totalGasCosts[chainId] ? toBN(this.totalGasCosts[chainId]) : toBN(0);
+    return this.totalGasCosts[chainId] ? toBN(this.totalGasCosts[chainId]) : ethersConstants.Zero;
   }
 
   // Estimate the gas cost of filling this relay.
@@ -152,7 +152,7 @@ export class ProfitClient {
     gasPriceUsd: BigNumber;
     gasCostUsd: BigNumber;
   } {
-    const gasTokenSymbol = [137].includes(chainId) ? "MATIC" : "WETH";
+    const gasTokenSymbol = [CHAIN_IDs.POLYGON, CHAIN_IDs.MUMBAI].includes(chainId) ? "MATIC" : "WETH";
     const gasTokenAddress = TOKEN_SYMBOLS_MAP[gasTokenSymbol].addresses[this.hubPoolClient.chainId];
     const gasPriceUsd = this.getPriceOfToken(gasTokenAddress);
     const nativeGasCost = this.getTotalGasCost(chainId); // gas cost in native token
@@ -378,7 +378,7 @@ export class ProfitClient {
     Object.values(l1Tokens).forEach((token: L1Token) => {
       const { address, symbol } = token;
       if (this.tokenPrices[address] === undefined) {
-        this.tokenPrices[address] = toBN(0);
+        this.tokenPrices[address] = ethersConstants.Zero;
         newTokens.push(symbol);
       }
     });
