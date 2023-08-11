@@ -42,9 +42,9 @@ export const GAS_TOKEN_BY_CHAIN_ID: { [chainId: number]: string } = {
   324: WETH,
   42161: WETH,
   // Testnets:
-  5: WETH,
-  280: WETH,
-  421613: WETH,
+  5: TOKEN_SYMBOLS_MAP.WETH.addresses[CHAIN_IDs.GOERLI],
+  280: TOKEN_SYMBOLS_MAP.WETH.addresses[CHAIN_IDs.GOERLI],
+  421613: TOKEN_SYMBOLS_MAP.WETH.addresses[CHAIN_IDs.GOERLI],
 };
 // TODO: Make this dynamic once we support chains with gas tokens that have different decimals.
 const GAS_TOKEN_DECIMALS = 18;
@@ -83,7 +83,7 @@ export class ProfitClient {
   // Queries needed to fetch relay gas costs.
   private relayerFeeQueries: { [chainId: number]: relayFeeCalculator.QueryInterface } = {};
 
-  private isGoerli: boolean;
+  private isTestnet: boolean;
 
   // @todo: Consolidate this set of args before it grows legs and runs away from us.
   constructor(
@@ -114,24 +114,30 @@ export class ProfitClient {
       );
     }
 
-    this.isGoerli = this.hubPoolClient.chainId === CHAIN_IDs.GOERLI;
+    this.isTestnet = this.hubPoolClient.chainId !== 1;
   }
 
   getAllPrices(): { [address: string]: BigNumber } {
     return this.tokenPrices;
   }
 
+  resolveTestnetTokenAddress(tokenAddress: string): L1Token {
+    const hubToken = this.hubPoolClient.getL1Tokens().find(({ address }) => address === tokenAddress);
+    const address = TOKEN_SYMBOLS_MAP[hubToken.symbol].addresses[1];
+    return { address, decimals: hubToken.decimals, symbol: hubToken.symbol };
+  }
+
   getPriceOfToken(token: string): BigNumber {
-    // Warn on this initially, and move to an assert() once any latent issues are resolved.
-    // assert(this.tokenPrices[token] !== undefined, `Token ${token} not in price list.`);
+    if (this.isTestnet) {
+      // For non-mainnet deployments, translate the testnet HubPool token address to a mainnet token address.
+      token = this.resolveTestnetTokenAddress(token).address;
+    }
+
     if (this.tokenPrices[token] === undefined) {
       this.logger.warn({ at: "ProfitClient#getPriceOfToken", message: `Token ${token} not in price list.` });
       return toBN(0);
     }
 
-    if (this.isGoerli && token === TOKEN_SYMBOLS_MAP.WETH.addresses[CHAIN_IDs.GOERLI]) {
-      return this.tokenPrices[WETH];
-    }
     return this.tokenPrices[token];
   }
 
@@ -146,7 +152,9 @@ export class ProfitClient {
     gasPriceUsd: BigNumber;
     gasCostUsd: BigNumber;
   } {
-    const gasPriceUsd = this.getPriceOfToken(GAS_TOKEN_BY_CHAIN_ID[chainId]);
+    const gasTokenSymbol = [137].includes(chainId) ? "MATIC" : "WETH";
+    const gasTokenAddress = TOKEN_SYMBOLS_MAP[gasTokenSymbol].addresses[this.hubPoolClient.chainId];
+    const gasPriceUsd = this.getPriceOfToken(gasTokenAddress);
     const nativeGasCost = this.getTotalGasCost(chainId); // gas cost in native token
 
     if (gasPriceUsd.lte(0) || nativeGasCost.lte(0)) {
@@ -344,9 +352,18 @@ export class ProfitClient {
   protected async updateTokenPrices(): Promise<void> {
     // Generate list of tokens to retrieve.
     const newTokens: string[] = [];
-    const l1Tokens: { [k: string]: L1Token } = Object.fromEntries(
+    let l1Tokens: { [k: string]: L1Token } = Object.fromEntries(
       this.hubPoolClient.getL1Tokens().map((token) => [token["address"], token])
     );
+
+    if (this.isTestnet) {
+      l1Tokens = Object.fromEntries(
+        this.hubPoolClient.getL1Tokens().map((token) => {
+          const { address, decimals, symbol } = this.resolveTestnetTokenAddress(token.address);
+          return [address, { address, decimals, symbol }];
+        })
+      );
+    }
 
     // Also include MATIC in the price queries as we need it for gas cost calculation.
     l1Tokens[MATIC] = {
@@ -354,16 +371,6 @@ export class ProfitClient {
       symbol: "MATIC",
       decimals: 18,
     };
-
-    // Support for relaying WETH on public testnet Goerli by adding price lookups for
-    // mainnet tokens which we'll ultimately use as the Goerli token prices.
-    if (this.isGoerli) {
-      l1Tokens[WETH] = {
-        address: WETH,
-        symbol: "WETH",
-        decimals: 18,
-      };
-    }
 
     this.logger.debug({ at: "ProfitClient", message: "Updating Profit client", tokens: Object.values(l1Tokens) });
 
